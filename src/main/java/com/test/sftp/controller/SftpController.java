@@ -17,26 +17,34 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.jcraft.jsch.SftpException;
+import com.test.sftp.connection.SftpConnectionException;
 import com.test.sftp.service.SftpService;
 
 @RestController
 public class SftpController {
-	
+
 	private static final Logger logger = LoggerFactory.getLogger(SftpController.class);
 
-	@Value("${sftp.file.destination}")
-	private String fileDest;
-	
+	@Value("${sftp.file.origin}")
+	private String fileOrigin;
+
 	@Autowired
 	private SftpService sftpService;
 
 	@GetMapping("/listFiles")
-	public List<String> listFiles() {
-		return sftpService.listFiles();
+	public ResponseEntity<?> listFiles() {
+		try {
+			List<String> fileNames = sftpService.listFiles();
+			return ResponseEntity.ok(fileNames);
+		} catch (SftpConnectionException | SftpException e) {
+			logger.error("Error listing files: " + e.getMessage());
+			return ResponseEntity.status(500).body(new ErrorResponse(500, "Error listing files: " + e.getMessage()));
+		}
 	}
 
 	@GetMapping("/download/{fileName}")
-	public ResponseEntity<byte[]> downloadFile(@PathVariable String fileName) {
+	public ResponseEntity<?> downloadFile(@PathVariable String fileName) {
 		try {
 			// Chiamata al metodo per il download del file
 			byte[] fileContent = sftpService.downloadFile(fileName);
@@ -48,33 +56,27 @@ public class SftpController {
 			// Restituisci il file come risposta HTTP
 			return ResponseEntity.ok().headers(headers).body(fileContent);
 		} catch (Exception e) {
-			e.printStackTrace();
-			return ResponseEntity.status(500).body(null);
+			logger.error("Error downloading file: " + e.getMessage());
+			return ResponseEntity.status(500).body(new ErrorResponse(500, "Error downloading file: " + e.getMessage()));
 		}
 	}
 
 	@PostMapping("/upload")
-	public String uploadFile(@RequestParam("file") MultipartFile file) {
+	public ResponseEntity<?> uploadFile(@RequestParam("file") MultipartFile file) {
 		if (file.isEmpty()) {
-			return "File non valido o vuoto";
+			return ResponseEntity.status(400).body(new ErrorResponse(400, "Invalid or empty file"));
 		}
 
 		try {
-			// Salva il file temporaneo sul disco
-			String localFilePath = fileDest + file.getOriginalFilename();
+			String localFilePath = fileOrigin + file.getOriginalFilename();
 			file.transferTo(new File(localFilePath));
-
-			// Chiamata al metodo per l'upload del file
 			sftpService.uploadFile(localFilePath);
-
-			// Elimina il file temporaneo dopo l'upload
 			File tempFile = new File(localFilePath);
 			tempFile.delete();
-
-			return "Upload del file completato con successo";
+			return ResponseEntity.ok("File upload completed successfully");
 		} catch (IOException e) {
-			e.printStackTrace();
-			return "Errore durante l'upload del file";
+			logger.error("Error uploading file: " + e.getMessage());
+			return ResponseEntity.status(500).body(new ErrorResponse(500, "Error uploading file: " + e.getMessage()));
 		}
 	}
 }

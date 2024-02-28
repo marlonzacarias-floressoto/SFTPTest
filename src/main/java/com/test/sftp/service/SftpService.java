@@ -9,49 +9,36 @@ import java.util.List;
 import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
 import com.jcraft.jsch.ChannelSftp;
-import com.jcraft.jsch.JSch;
-import com.jcraft.jsch.Session;
-import com.test.sftp.controller.SftpController;
+import com.jcraft.jsch.JSchException;
+import com.jcraft.jsch.SftpException;
+import com.test.sftp.connection.SftpConnection;
+import com.test.sftp.connection.SftpConnectionException;
 
 @Service
 public class SftpService {
-	
-	private static final Logger logger = LoggerFactory.getLogger(SftpController.class);
 
-	@Value("${sftp.host}")
-	private String host;
-
-	@Value("${sftp.port}")
-	private int port;
-
-	@Value("${sftp.user}")
-	private String user;
-
-	@Value("${sftp.password}")
-	private String password;
+	private static final Logger logger = LoggerFactory.getLogger(SftpService.class);
 
 	@Value("${sftp.remoteDir}")
 	private String remoteDir;
 
-	@Value("${sftp.file.destination}")
-	private String fileDest;
+	private SftpConnection sftpConnection;
+	
+    @Autowired
+    public SftpService(SftpConnection sftpConnection) {
+        this.sftpConnection = sftpConnection;
+    }
 
-	public List<String> listFiles() {
-		JSch jsch = new JSch();
-		Session session = null;
+	public List<String> listFiles() throws SftpConnectionException, SftpException {
 		List<String> fileNames = new ArrayList<>();
-
+		ChannelSftp channelSftp = null;
 		try {
-			session = jsch.getSession(user, host, port);
-			session.setConfig("StrictHostKeyChecking", "no");
-			session.setPassword(password);
-			session.connect();
-
-			ChannelSftp channelSftp = (ChannelSftp) session.openChannel("sftp");
-			channelSftp.connect();
+			channelSftp = sftpConnection.openChannel();
 
 			// Elenco dei file nella cartella remota
 			List<ChannelSftp.LsEntry> list = channelSftp.ls(remoteDir);
@@ -61,66 +48,43 @@ public class SftpService {
 					fileNames.add(entry.getFilename());
 				}
 			}
-
-			channelSftp.disconnect();
-			session.disconnect();
-		} catch (Exception e) {
-			e.printStackTrace();
+		} catch (JSchException e) {
+			logger.error("Error listing files: " + e.getMessage());
+		} finally {
+			if (channelSftp != null && channelSftp.isConnected()) {
+				channelSftp.disconnect();
+			}
 		}
 
 		return fileNames;
 	}
 
 	public byte[] downloadFile(String fileName) {
+
 		byte[] fileContent = null;
-
-		JSch jsch = new JSch();
-		Session session = null;
 		try {
-			session = jsch.getSession(user, host, port);
-			session.setConfig("StrictHostKeyChecking", "no");
-			session.setPassword(password);
-			session.connect();
-
-			ChannelSftp channelSftp = (ChannelSftp) session.openChannel("sftp");
-			channelSftp.connect();
-
+			ChannelSftp channelSftp = sftpConnection.openChannel();
 			// Download del file
-			InputStream inputStream = channelSftp.get(remoteDir + fileName);
-			fileContent = IOUtils.toByteArray(inputStream);
-
-			channelSftp.disconnect();
-			session.disconnect();
+			try (InputStream inputStream = channelSftp.get(remoteDir + fileName)) {
+				fileContent = IOUtils.toByteArray(inputStream);
+			}
 		} catch (Exception e) {
-			e.printStackTrace();
+			logger.error("Error downloading file: " + e.getMessage());
 		}
-
 		return fileContent;
 	}
 
 	public void uploadFile(String localFilePath) {
-		JSch jsch = new JSch();
-		Session session = null;
 
 		try {
-			session = jsch.getSession(user, host, port);
-			session.setConfig("StrictHostKeyChecking", "no");
-			session.setPassword(password);
-			session.connect();
-
-			ChannelSftp channelSftp = (ChannelSftp) session.openChannel("sftp");
-			channelSftp.connect();
-
+			ChannelSftp channelSftp = sftpConnection.openChannel();
 			File localFile = new File(localFilePath);
 			String remoteFileName = localFile.getName();
 
 			// Upload del file
 			channelSftp.put(new FileInputStream(localFile), remoteDir + remoteFileName);
-
-			channelSftp.disconnect();
-			session.disconnect();
 		} catch (Exception e) {
-			e.printStackTrace();
+			logger.error("Error uploading file: " + e.getMessage());
 		}
 	}
 }
